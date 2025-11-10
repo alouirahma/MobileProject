@@ -1,0 +1,35 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        
+       
+
+
+       
+        {
+            "name": "mobile2025",
+            "cwd": "mobile2025",
+            "request": "launch",
+            "type": "dart"
+        },
+        {
+            "name": "mobile2025 (profile mode)",
+            "cwd": "mobile2025",
+            "request": "launch",
+            "type": "dart",
+            "flutterMode": "profile"
+        },
+        {
+            "name": "mobile2025 (release mode)",
+            "cwd": "mobile2025",
+            "request": "launch",
+            "type": "dart",
+            "flutterMode": "release"
+        },
+      
+        
+    ]
+}
