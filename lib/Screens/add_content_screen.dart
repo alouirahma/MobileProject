@@ -5,6 +5,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:mobile2025/Services/database_helper.dart';
 import 'package:mobile2025/Entites/content.dart';
 import 'package:uuid/uuid.dart';
+import 'package:path_provider/path_provider.dart';
 import 'dart:io';
 
 class AddContentScreen extends StatefulWidget {
@@ -38,7 +39,7 @@ class _AddContentScreenState extends State<AddContentScreen> {
     _genre = widget.content?.genre ?? 'Pop';
     _cover = widget.content?.coverUrl;
     _file = widget.content?.url;
-    _fileName = _file?.split('/').last;
+    _fileName = _file?.split('/').last ?? _file?.split('\\').last;
     _public = widget.content?.isPublic ?? true;
   }
 
@@ -57,12 +58,16 @@ class _AddContentScreenState extends State<AddContentScreen> {
   }
 
   Future<void> _pickFile() async {
-    final t = _type == 'audio' ? FileType.audio : FileType.video;
-    final r = await FilePicker.platform.pickFiles(type: t);
-    if (r != null) {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.audio,
+      initialDirectory: r'C:\Users\jmili\OneDrive\Desktop\musique', // TON DOSSIER
+      allowMultiple: false,
+    );
+
+    if (result != null && result.files.single.path != null) {
       setState(() {
-        _file = r.files.single.path;
-        _fileName = r.files.single.name;
+        _file = result.files.single.path;
+        _fileName = result.files.single.name;
       });
     }
   }
@@ -70,13 +75,23 @@ class _AddContentScreenState extends State<AddContentScreen> {
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
 
+    String? cheminFinal = _file;
+
+    if (_file != null) {
+      final dossierApp = await getApplicationDocumentsDirectory();
+      final nomFichier = _file!.split(Platform.pathSeparator).last;
+      final fichierLocal = File('${dossierApp.path}/$nomFichier');
+      await File(_file!).copy(fichierLocal.path);
+      cheminFinal = fichierLocal.path;
+    }
+
     final c = Content(
       id: widget.content?.id ?? const Uuid().v4(),
       type: _type,
       title: _title.text.trim(),
       artist: _artist.text.trim().isEmpty ? null : _artist.text.trim(),
       duration: int.tryParse(_duration.text),
-      url: _file,
+      url: cheminFinal,
       coverUrl: _cover,
       genre: _genre,
       tags: _tags.text.split(',').map((t) => t.trim()).where((t) => t.isNotEmpty).toList(),
@@ -88,6 +103,7 @@ class _AddContentScreenState extends State<AddContentScreen> {
     } else {
       await _db.updateContent(c.id, c.toMap());
     }
+
     if (mounted) Navigator.pop(context, true);
   }
 
