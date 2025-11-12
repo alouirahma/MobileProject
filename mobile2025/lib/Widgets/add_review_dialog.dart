@@ -72,14 +72,20 @@ class _AddReviewDialogState extends State<AddReviewDialog> {
             if (!_isReply) ...[
               const Text('Type de notation'),
               const SizedBox(height: 8),
-              RatingTypeSelector(
-                selectedType: _ratingType,
-                onTypeChanged: (type) {
-                  setState(() {
-                    _ratingType = type;
-                    _rating = 0;
-                  });
-                },
+              SizedBox(
+                width: double.infinity,
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: RatingTypeSelector(
+                    selectedType: _ratingType,
+                    onTypeChanged: (type) {
+                      setState(() {
+                        _ratingType = type;
+                        _rating = 0;
+                      });
+                    },
+                  ),
+                ),
               ),
               const SizedBox(height: 16),
               const Text('Votre note'),

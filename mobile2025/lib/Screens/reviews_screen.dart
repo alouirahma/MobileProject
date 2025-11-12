@@ -751,19 +751,25 @@ class _ReviewsScreenState extends State<ReviewsScreen> {
     return replies.expand((reply) {
       final widgets = <Widget>[
         Padding(
-          padding: const EdgeInsets.only(top: 8),
-          child: ReviewItemWidget(
-            review: reply,
-            userName: reply.userId == widget.currentUserId ? 'Vous' : _usersLabels[reply.userId] ?? 'Utilisateur ${reply.userId}',
-            onReport: () => _reportReview(reply),
-            onReply: () => _showReplyDialogWithMention(reply, mention: _mentionFor(reply.userId)),
-            onLike: reply.userId == widget.currentUserId ? null : () => _likeReview(reply),
-            onDislike: reply.userId == widget.currentUserId ? null : () => _dislikeReview(reply),
-            onLongPress: reply.userId == widget.currentUserId ? () => _showReplyActions(reply) : null,
-            userReaction: _userReactions[reply.id],
-            showReplyButton: true,
-            margin: EdgeInsets.only(left: indent, right: 16),
-            highlight: _highlightReviewId == reply.id,
+          padding: EdgeInsets.only(top: 8, left: indent, right: 16),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width - indent - 32),
+              child: ReviewItemWidget(
+                review: reply,
+                userName: reply.userId == widget.currentUserId ? 'Vous' : _usersLabels[reply.userId] ?? 'Utilisateur ${reply.userId}',
+                onReport: () => _reportReview(reply),
+                onReply: () => _showReplyDialogWithMention(reply, mention: _mentionFor(reply.userId)),
+                onLike: reply.userId == widget.currentUserId ? null : () => _likeReview(reply),
+                onDislike: reply.userId == widget.currentUserId ? null : () => _dislikeReview(reply),
+                onLongPress: reply.userId == widget.currentUserId ? () => _showReplyActions(reply) : null,
+                userReaction: _userReactions[reply.id],
+                showReplyButton: true,
+                margin: EdgeInsets.zero,
+                highlight: _highlightReviewId == reply.id,
+              ),
+            ),
           ),
         ),
       ];

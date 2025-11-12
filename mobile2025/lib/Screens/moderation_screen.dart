@@ -254,14 +254,19 @@ class _ModerationScreenState extends State<ModerationScreen> {
       children: [
         Text('Filtres', style: Theme.of(context).textTheme.titleMedium),
         const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          children: [
-            _buildFilterChip(null, 'Tous'),
-            _buildFilterChip('stars', 'Étoiles'),
-            _buildFilterChip('thumbs', 'Pouces'),
-            _buildFilterChip('heart', 'Cœur'),
-          ],
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: [
+              _buildFilterChip(null, 'Tous'),
+              const SizedBox(width: 8),
+              _buildFilterChip('stars', 'Étoiles'),
+              const SizedBox(width: 8),
+              _buildFilterChip('thumbs', 'Pouces'),
+              const SizedBox(width: 8),
+              _buildFilterChip('heart', 'Cœur'),
+            ],
+          ),
         ),
         const SizedBox(height: 12),
         Row(
