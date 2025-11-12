@@ -14,6 +14,7 @@ class ReviewItemWidget extends StatelessWidget {
   final VoidCallback? onLongPress;
   final EdgeInsetsGeometry? margin;
   final String? userReaction;
+  final bool highlight;
   final bool showReplyButton;
   final bool isModerator;
 
@@ -29,6 +30,7 @@ class ReviewItemWidget extends StatelessWidget {
     this.onLongPress,
     this.margin,
     this.userReaction,
+    this.highlight = false,
     this.showReplyButton = true,
     this.isModerator = false,
   });
@@ -39,8 +41,9 @@ class ReviewItemWidget extends StatelessWidget {
       onLongPress: onLongPress,
       behavior: HitTestBehavior.opaque,
       child: Card(
+        color: highlight ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.12) : null,
         margin: margin ?? const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        child: Padding(
+      child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -64,15 +67,15 @@ class ReviewItemWidget extends StatelessWidget {
                       ),
                       const SizedBox(height: 4),
                       if (!review.isReply)
-                        RatingDisplayWidget(
-                          ratingType: review.ratingType,
-                          rating: review.rating,
+                      RatingDisplayWidget(
+                        ratingType: review.ratingType,
+                        rating: review.rating,
                         )
                       else
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                           decoration: BoxDecoration(
-                            color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
+                            color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: Text(
@@ -83,7 +86,7 @@ class ReviewItemWidget extends StatelessWidget {
                               fontWeight: FontWeight.w500,
                             ),
                           ),
-                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -119,7 +122,7 @@ class ReviewItemWidget extends StatelessWidget {
                     onPressed: onDislike,
                   ),
                 const Spacer(),
-                if (showReplyButton && onReply != null && !review.isReply)
+                if (onReply != null)
                   TextButton.icon(
                     onPressed: onReply,
                     icon: const Icon(Icons.reply, size: 16),
@@ -128,7 +131,7 @@ class ReviewItemWidget extends StatelessWidget {
                       padding: const EdgeInsets.symmetric(horizontal: 8),
                     ),
                   ),
-                if (onReport != null && !review.isReply)
+                if (onReport != null)
                   IconButton(
                     icon: const Icon(Icons.flag_outlined),
                     iconSize: 18,

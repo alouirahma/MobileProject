@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:mobile2025/Services/database_helper.dart';
 import 'package:mobile2025/Screens/content_screen.dart';
+import 'package:mobile2025/Services/notification_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -13,7 +14,9 @@ void main() async {
     debugPrint('Erreur d\'initialisation de la base de données: $e');
     // Continuer quand même, la DB sera créée à la première utilisation
   }
-  
+
+  await NotificationService().init();
+
   runApp(const MyApp());
 }
 

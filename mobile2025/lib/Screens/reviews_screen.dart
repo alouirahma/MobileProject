@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:mobile2025/Entites/content.dart';
 import 'package:mobile2025/Entites/review.dart';
 import 'package:mobile2025/Services/database_helper.dart';
+import 'package:mobile2025/Services/notification_service.dart';
 import 'package:mobile2025/Screens/moderation_screen.dart';
 import 'package:mobile2025/Widgets/add_review_dialog.dart';
 import 'package:mobile2025/Widgets/review_item_widget.dart';
@@ -10,12 +11,14 @@ class ReviewsScreen extends StatefulWidget {
   final Content content;
   final String currentUserId;
   final bool isModerator;
+  final String? preselectedReviewId;
 
   const ReviewsScreen({
     super.key,
     required this.content,
     required this.currentUserId,
     this.isModerator = false,
+    this.preselectedReviewId,
   });
 
   @override
@@ -28,6 +31,7 @@ class _ReviewsScreenState extends State<ReviewsScreen> {
   Map<String, List<Review>> _replies = {};
   Review? _userReview;
   Map<String, String> _usersLabels = {};
+  String? _highlightReviewId;
   bool _isLoading = true;
   bool _isRefreshing = false;
   double _averageRating = 0.0;
@@ -41,6 +45,26 @@ class _ReviewsScreenState extends State<ReviewsScreen> {
     super.initState();
     _loadAll();
     _loadUsers();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_highlightReviewId != null) {
+      Future.microtask(() => _scrollToReview(_highlightReviewId!));
+    }
+  }
+
+  final ScrollController _scrollController = ScrollController();
+
+  Future<void> _scrollToReview(String reviewId) async {
+    if (!_scrollController.hasClients) return;
+    // Basic approach: scroll to top for now. Could be improved with keys.
+    _scrollController.animateTo(
+      0,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeInOut,
+    );
   }
 
   Future<void> _loadUsers() async {
@@ -89,19 +113,15 @@ class _ReviewsScreenState extends State<ReviewsScreen> {
     );
 
     final reviews = reviewsData.map((map) => Review.fromMap(map)).toList();
-    final repliesMap = <String, List<Review>>{};
+    final replyGroups = <String, List<Review>>{};
     final otherReviews = <Review>[];
     Review? userReview;
 
-    final replyGroups = <String, List<Review>>{};
     for (final review in reviews.where((review) => review.isReply)) {
       replyGroups.putIfAbsent(review.parentId ?? '', () => []).add(review);
     }
 
     for (final review in reviews.where((review) => !review.isReply)) {
-      final replies = replyGroups[review.id] ?? [];
-      repliesMap[review.id] = replies;
-
       if (review.userId == widget.currentUserId) {
         userReview = review;
       } else {
@@ -117,9 +137,12 @@ class _ReviewsScreenState extends State<ReviewsScreen> {
       setState(() {
         _userReview = userReview;
         _reviews = otherReviews;
-        _replies = repliesMap;
+        _replies = replyGroups;
         _userReactions = userReactions;
       });
+      if (widget.preselectedReviewId != null) {
+        _highlightReviewId = widget.preselectedReviewId;
+      }
     }
   }
 
@@ -147,10 +170,33 @@ class _ReviewsScreenState extends State<ReviewsScreen> {
         'parentId': parentId,
       };
 
+      Map<String, dynamic>? parentReview;
+      if (parentId != null) {
+        parentReview = await _db.getReviewById(parentId);
+      }
+
       if (parentId != null) {
         await _db.addReview(reviewData);
       } else {
         await _db.upsertReview(reviewData);
+      }
+
+      if (parentReview != null) {
+        final parentUserId = parentReview['userId'] as String?;
+        if (parentUserId != null && parentUserId != widget.currentUserId) {
+          final responderName = _usersLabels[widget.currentUserId] ?? 'Utilisateur ${widget.currentUserId}';
+          final body = comment != null && comment.isNotEmpty
+              ? '$responderName a répondu : ${comment.length > 40 ? '${comment.substring(0, 40)}…' : comment}'
+              : '$responderName a répondu à votre avis.';
+          final payload = '${widget.content.id}:${parentReview['id']}';
+          await _db.addNotification(parentUserId, 'Nouvelle réponse', body, payload: payload);
+          if (parentUserId == widget.currentUserId) {
+            await NotificationService().showReplyNotification(
+              responderName: responderName,
+              contentTitle: widget.content.title,
+            );
+          }
+        }
       }
 
       await _loadAll();
@@ -446,12 +492,13 @@ class _ReviewsScreenState extends State<ReviewsScreen> {
     );
   }
 
-  void _showReplyDialog(Review parentReview) {
+  void _showReplyDialogWithMention(Review parentReview, {String? mention}) {
     showDialog(
       context: context,
       builder: (ctx) => AddReviewDialog(
         contentId: widget.content.id,
         parentReviewId: parentReview.id,
+        initialComment: mention,
         onSubmit: (ratingType, rating, comment) {
           _addReview(ratingType, rating, comment, parentId: parentReview.id);
         },
@@ -487,6 +534,7 @@ class _ReviewsScreenState extends State<ReviewsScreen> {
           : RefreshIndicator(
               onRefresh: _loadAll,
               child: ListView(
+                controller: _scrollController,
                 padding: const EdgeInsets.only(bottom: 96),
                 children: [
                   _buildStatisticsSection(),
@@ -638,7 +686,6 @@ class _ReviewsScreenState extends State<ReviewsScreen> {
       );
     }
 
-    final replies = _replies[review.id] ?? [];
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Card(
@@ -656,22 +703,9 @@ class _ReviewsScreenState extends State<ReviewsScreen> {
                 margin: EdgeInsets.zero,
                 onLongPress: () => _showUserReviewActions(review),
                 userReaction: _userReactions[review.id],
+                highlight: _highlightReviewId == review.id,
               ),
-              if (replies.isNotEmpty) ...[
-                const Divider(),
-                ...replies.map((reply) => Padding(
-                      padding: const EdgeInsets.only(left: 24, top: 8),
-                      child: ReviewItemWidget(
-                        review: reply,
-                        userName: reply.userId == widget.currentUserId ? 'Vous' : _usersLabels[reply.userId] ?? 'Utilisateur ${reply.userId}',
-                        showReplyButton: false,
-                        onLongPress: reply.userId == widget.currentUserId ? () => _showReplyActions(reply) : null,
-                        onLike: reply.userId == widget.currentUserId ? null : () => _likeReview(reply),
-                        onDislike: reply.userId == widget.currentUserId ? null : () => _dislikeReview(reply),
-                        userReaction: _userReactions[reply.id],
-                      ),
-                    )),
-              ],
+              ..._buildReplyThread(review.id, depth: 1),
             ],
           ),
         ),
@@ -686,7 +720,6 @@ class _ReviewsScreenState extends State<ReviewsScreen> {
 
     return Column(
       children: _reviews.map((review) {
-        final replies = _replies[review.id] ?? [];
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -694,30 +727,54 @@ class _ReviewsScreenState extends State<ReviewsScreen> {
               review: review,
               userName: review.userId == widget.currentUserId ? 'Vous' : _usersLabels[review.userId] ?? 'Utilisateur ${review.userId}',
               onReport: () => _reportReview(review),
-              onReply: () => _showReplyDialog(review),
+              onReply: () => _showReplyDialogWithMention(review, mention: _mentionFor(review.userId)),
               onLike: review.userId == widget.currentUserId ? null : () => _likeReview(review),
               onDislike: review.userId == widget.currentUserId ? null : () => _dislikeReview(review),
               isModerator: widget.isModerator,
               userReaction: _userReactions[review.id],
+              highlight: _highlightReviewId == review.id,
             ),
-            ...replies.map((reply) => Padding(
-                  padding: const EdgeInsets.only(left: 32),
-                  child: ReviewItemWidget(
-                    review: reply,
-                    userName: reply.userId == widget.currentUserId ? 'Vous' : _usersLabels[reply.userId] ?? 'Utilisateur ${reply.userId}',
-                    showReplyButton: false,
-                    isModerator: widget.isModerator,
-                    onLongPress: reply.userId == widget.currentUserId ? () => _showReplyActions(reply) : null,
-                    onLike: reply.userId == widget.currentUserId ? null : () => _likeReview(reply),
-                    onDislike: reply.userId == widget.currentUserId ? null : () => _dislikeReview(reply),
-                    userReaction: _userReactions[reply.id],
-                  ),
-                )),
+            ..._buildReplyThread(review.id, depth: 1),
             const Divider(height: 32),
           ],
         );
       }).toList(),
     );
+  }
+
+  List<Widget> _buildReplyThread(String parentId, {int depth = 1}) {
+    final replies = _replies[parentId] ?? [];
+    if (replies.isEmpty) return [];
+
+    final indent = 24.0 * depth;
+
+    return replies.expand((reply) {
+      final widgets = <Widget>[
+        Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: ReviewItemWidget(
+            review: reply,
+            userName: reply.userId == widget.currentUserId ? 'Vous' : _usersLabels[reply.userId] ?? 'Utilisateur ${reply.userId}',
+            onReport: () => _reportReview(reply),
+            onReply: () => _showReplyDialogWithMention(reply, mention: _mentionFor(reply.userId)),
+            onLike: reply.userId == widget.currentUserId ? null : () => _likeReview(reply),
+            onDislike: reply.userId == widget.currentUserId ? null : () => _dislikeReview(reply),
+            onLongPress: reply.userId == widget.currentUserId ? () => _showReplyActions(reply) : null,
+            userReaction: _userReactions[reply.id],
+            showReplyButton: true,
+            margin: EdgeInsets.only(left: indent, right: 16),
+            highlight: _highlightReviewId == reply.id,
+          ),
+        ),
+      ];
+      widgets.addAll(_buildReplyThread(reply.id, depth: depth + 1));
+      return widgets;
+    }).toList();
+  }
+
+  String _mentionFor(String userId) {
+    final name = _usersLabels[userId] ?? 'Utilisateur $userId';
+    return '@$name ';
   }
 }
 

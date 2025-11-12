@@ -13,7 +13,7 @@ class DatabaseHelper {
   static Database? _database;
 
   static const String _dbName = 'mobile2025.db';
-  static const int _dbVersion = 4;
+  static const int _dbVersion = 5;
 
   static const String tableContents = 'contents';
   static const String tableUsers = 'users';
@@ -21,6 +21,7 @@ class DatabaseHelper {
   static const String tableReviews = 'reviews';
   static const String tableReviewReports = 'review_reports';
   static const String tableReviewReactions = 'review_reactions';
+  static const String tableNotifications = 'notifications';
   static const String tableEvents = 'events';
 
   Future<Database> get database async {
@@ -171,6 +172,19 @@ class DatabaseHelper {
         FOREIGN KEY (userId) REFERENCES $tableUsers(id) ON DELETE CASCADE
       )
     ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS $tableNotifications (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        userId TEXT NOT NULL,
+        title TEXT NOT NULL,
+        body TEXT NOT NULL,
+        date TEXT NOT NULL,
+        isRead INTEGER DEFAULT 0,
+        payload TEXT,
+        FOREIGN KEY (userId) REFERENCES $tableUsers(id) ON DELETE CASCADE
+      )
+    ''');
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
@@ -217,6 +231,45 @@ class DatabaseHelper {
       final hasModerator = existingColumns.any((row) => row['name'] == 'isModerator');
       if (!hasModerator) {
         await db.execute('ALTER TABLE $tableUsers ADD COLUMN isModerator INTEGER DEFAULT 0');
+      }
+
+      final notificationColumns = await db.rawQuery("PRAGMA table_info($tableNotifications)");
+      if (notificationColumns.isEmpty) {
+        await db.execute('''
+          CREATE TABLE IF NOT EXISTS $tableNotifications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            userId TEXT NOT NULL,
+            title TEXT NOT NULL,
+            body TEXT NOT NULL,
+            date TEXT NOT NULL,
+            isRead INTEGER DEFAULT 0,
+            payload TEXT,
+            FOREIGN KEY (userId) REFERENCES $tableUsers(id) ON DELETE CASCADE
+          )
+        ''');
+      } else {
+        final hasPayload = notificationColumns.any((row) => row['name'] == 'payload');
+        if (!hasPayload) {
+          await db.execute('ALTER TABLE $tableNotifications ADD COLUMN payload TEXT');
+        }
+      }
+    }
+
+    if (oldVersion < 5) {
+      final notificationColumns = await db.rawQuery("PRAGMA table_info($tableNotifications)");
+      if (notificationColumns.isEmpty) {
+        await db.execute('''
+          CREATE TABLE IF NOT EXISTS $tableNotifications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            userId TEXT NOT NULL,
+            title TEXT NOT NULL,
+            body TEXT NOT NULL,
+            date TEXT NOT NULL,
+            isRead INTEGER DEFAULT 0,
+            payload TEXT,
+            FOREIGN KEY (userId) REFERENCES $tableUsers(id) ON DELETE CASCADE
+          )
+        ''');
       }
     }
   }
@@ -572,6 +625,7 @@ class DatabaseHelper {
     final review = await getReviewById(reviewId);
     var likes = (review?['likes'] as int?) ?? 0;
     var dislikes = (review?['dislikes'] as int?) ?? 0;
+    final reviewOwnerId = review?['userId'] as String?;
 
     final existing = await db.query(
       tableReviewReactions,
@@ -637,6 +691,18 @@ class DatabaseHelper {
     }
 
     await updateReview(reviewId, {'likes': likes, 'dislikes': dislikes});
+
+    if (reviewOwnerId != null && reviewOwnerId != userId && reaction == 'like') {
+      final reactorName = (await getUserById(userId))?['name'] as String? ?? 'Utilisateur $userId';
+      final body = '$reactorName aime votre réponse.';
+      await addNotification(reviewOwnerId, 'Nouvelle réaction', body, payload: '${review?['contentId']}:$reviewId');
+    }
+  }
+
+  Future<Map<String, dynamic>?> getUserById(String userId) async {
+    final db = await database;
+    final result = await db.query(tableUsers, where: 'id = ?', whereArgs: [userId], limit: 1);
+    return result.isNotEmpty ? result.first : null;
   }
 
   Future<void> reportReview(String reviewId, String userId, {String? reason}) async {
@@ -661,14 +727,99 @@ class DatabaseHelper {
     }
   }
 
-  Future<List<Map<String, dynamic>>> getReportedReviews({int minReports = 1}) async {
+  Future<List<Map<String, dynamic>>> getReportedReviews({int minReports = 1, String? ratingType, String? sortOption}) async {
+    final db = await database;
+    final whereClauses = <String>['reportedCount >= ?'];
+    final whereArgs = <Object?>[minReports];
+
+    if (ratingType != null) {
+      whereClauses.add('ratingType = ?');
+      whereArgs.add(ratingType);
+    }
+
+    String orderBy;
+    switch (sortOption) {
+      case 'date_asc':
+        orderBy = 'date ASC';
+        break;
+      case 'date_desc':
+        orderBy = 'date DESC';
+        break;
+      case 'reports_asc':
+        orderBy = 'reportedCount ASC, date DESC';
+        break;
+      case 'likes_desc':
+        orderBy = 'likes DESC, date DESC';
+        break;
+      case 'likes_asc':
+        orderBy = 'likes ASC, date DESC';
+        break;
+      default:
+        orderBy = 'reportedCount DESC, date DESC';
+    }
+
+    return db.query(
+      tableReviews,
+      where: whereClauses.join(' AND '),
+      whereArgs: whereArgs,
+      orderBy: orderBy,
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> getModeratedReviews({String? ratingType}) async {
+    final db = await database;
+    final whereClauses = <String>['isApproved = 0'];
+    final whereArgs = <Object?>[];
+
+    if (ratingType != null) {
+      whereClauses.add('ratingType = ?');
+      whereArgs.add(ratingType);
+    }
+
+    return db.query(
+      tableReviews,
+      where: whereClauses.join(' AND '),
+      whereArgs: whereArgs,
+      orderBy: 'moderationDate DESC, date DESC',
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> getRejectedReviews() async {
     final db = await database;
     return db.query(
       tableReviews,
-      where: 'reportedCount >= ? AND isApproved = 1',
-      whereArgs: [minReports],
-      orderBy: 'reportedCount DESC, date DESC',
+      where: 'isApproved = 0',
+      orderBy: 'moderationDate DESC NULLS LAST, date DESC',
     );
+  }
+
+  Future<List<Map<String, dynamic>>> getModeratedHistory({int limit = 20}) async {
+    final db = await database;
+    return db.query(
+      tableReviews,
+      where: 'moderatedBy IS NOT NULL',
+      orderBy: 'moderationDate DESC NULLS LAST, date DESC',
+      limit: limit,
+    );
+  }
+
+  Future<Map<String, int>> getModerationStats() async {
+    final db = await database;
+    final pending = Sqflite.firstIntValue(await db.rawQuery(
+      'SELECT COUNT(*) FROM $tableReviews WHERE reportedCount > 0 AND isApproved = 1',
+    )) ?? 0;
+    final rejected = Sqflite.firstIntValue(await db.rawQuery(
+      'SELECT COUNT(*) FROM $tableReviews WHERE isApproved = 0',
+    )) ?? 0;
+    final totalModerated = Sqflite.firstIntValue(await db.rawQuery(
+      'SELECT COUNT(*) FROM $tableReviews WHERE moderatedBy IS NOT NULL',
+    )) ?? 0;
+
+    return {
+      'pending': pending,
+      'rejected': rejected,
+      'moderated': totalModerated,
+    };
   }
 
   Future<void> moderateReview(String reviewId, String moderatorId, bool approve, {String? reason}) async {
@@ -680,6 +831,23 @@ class DatabaseHelper {
       'moderatedBy': moderatorId,
       'moderationDate': DateTime.now().toIso8601String(),
       'moderationReason': reason,
+      'reportedCount': 0,
+    }, where: 'id = ?', whereArgs: [reviewId]);
+
+    await db.delete(
+      tableReviewReports,
+      where: 'reviewId = ?',
+      whereArgs: [reviewId],
+    );
+  }
+
+  Future<void> restoreReview(String reviewId, String moderatorId) async {
+    final db = await database;
+    await db.update(tableReviews, {
+      'isApproved': 1,
+      'moderatedBy': moderatorId,
+      'moderationDate': DateTime.now().toIso8601String(),
+      'moderationReason': null,
       'reportedCount': 0,
     }, where: 'id = ?', whereArgs: [reviewId]);
 
@@ -711,5 +879,60 @@ class DatabaseHelper {
         await update(tableEvents, {'registeredUsers': jsonEncode(users)}, eventId);
       }
     }
+  }
+
+  Future<void> addNotification(String userId, String title, String body, {String? payload}) async {
+    final db = await database;
+    await db.insert(tableNotifications, {
+      'userId': userId,
+      'title': title,
+      'body': body,
+      'date': DateTime.now().toIso8601String(),
+      'isRead': 0,
+      'payload': payload,
+    });
+  }
+
+  Future<List<Map<String, dynamic>>> getNotifications(String userId) async {
+    final db = await database;
+    return db.query(
+      tableNotifications,
+      where: 'userId = ?',
+      whereArgs: [userId],
+      orderBy: 'date DESC',
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> getUnreadNotifications(String userId) async {
+    final db = await database;
+    return db.query(
+      tableNotifications,
+      where: 'userId = ? AND isRead = 0',
+      whereArgs: [userId],
+      orderBy: 'date DESC',
+    );
+  }
+
+  Future<void> markNotificationsRead(List<int> ids) async {
+    if (ids.isEmpty) return;
+    final db = await database;
+    await db.update(
+      tableNotifications,
+      {'isRead': 1},
+      where: 'id IN (${List.filled(ids.length, '?').join(',')})',
+      whereArgs: ids,
+    );
+  }
+
+  Future<Map<String, dynamic>?> getNotificationById(int id) async {
+    final db = await database;
+    final result = await db.query(tableNotifications, where: 'id = ?', whereArgs: [id], limit: 1);
+    return result.isNotEmpty ? result.first : null;
+  }
+
+  Future<Map<String, dynamic>?> getContentById(String contentId) async {
+    final db = await database;
+    final result = await db.query(tableContents, where: 'id = ?', whereArgs: [contentId], limit: 1);
+    return result.isNotEmpty ? result.first : null;
   }
 }
